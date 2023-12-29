@@ -3,3 +3,12 @@
 jid = "jid@example.org"
 password = "sOmePa55W0rD"
 
+# configure logging, defaults are commented, unless you are a developer leave this alone
+# can also set env variables KISS_XMPP_LOG_LEVEL and/or KISS_XMPP_LOG_STYLE, but values in this file override them
+# many options, refer to: https://docs.rs/env_logger/0.8.3/env_logger/#enabling-logging
+#log_level = "info"
+# for development/debugging: log_level = "info,kiss_xmpp=trace"
+
+# one of auto, always, never, refer to: https://docs.rs/env_logger/0.8.3/env_logger/#disabling-colors
+#log_style = "never"
+

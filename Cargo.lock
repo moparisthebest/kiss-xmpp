@@ -520,6 +520,7 @@ dependencies = [
  "dirs",
  "env_logger",
  "futures",
+ "log",
  "minidom",
  "rand",
  "serde",

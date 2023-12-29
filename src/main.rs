@@ -1,6 +1,8 @@
 use anyhow::Result;
 use die::{die, Die};
+use env_logger::{Builder, Env, Target};
 use futures::stream::StreamExt;
+use log::{info, trace};
 use serde_derive::Deserialize;
 use std::{convert::TryFrom, fs::File, io::Read, iter::Iterator, path::Path, str::FromStr};
 use tokio::io::{self, AsyncBufReadExt, BufReader};
@@ -16,6 +18,8 @@ use xmpp_parsers::{
 struct Config {
     jid: String,
     password: String,
+    log_level: Option<String>,
+    log_style: Option<String>,
 }
 
 fn parse_cfg<P: AsRef<Path>>(path: P) -> Result<Config> {
@@ -46,8 +50,6 @@ impl Context {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
-
     let mut args = Args::default();
 
     if args.flags(&["-h", "--help"]) {
@@ -74,6 +76,21 @@ async fn main() -> Result<()> {
         .expect("never panics due to length check above");
     let bare_me = BareJid::from_str(&cfg.jid).die("invalid account jid from config file");
     let contact = Jid::from_str(&contact).die("invalid contact jid on command line");
+
+    let env = Env::default()
+        .filter_or("KISS_XMPP_LOG_LEVEL", "info")
+        .write_style_or("KISS_XMPP_LOG_STYLE", "never");
+    let mut builder = Builder::from_env(env);
+    builder.target(Target::Stdout);
+    if let Some(ref log_level) = cfg.log_level {
+        builder.parse_filters(log_level);
+    }
+    if let Some(ref log_style) = cfg.log_style {
+        builder.parse_write_style(log_style);
+    }
+    // todo: config for this: builder.format_timestamp(None);
+    builder.init();
+
     let context = Context::new(bare_me, contact);
 
     let stdin = io::stdin();
@@ -122,7 +139,7 @@ async fn handle_xmpp(event: Event, client: &mut Client, context: &Context) -> Re
 #[async_recursion::async_recursion]
 async fn handle_xmpp_element(element: Element, context: &Context) -> Result<()> {
     if let Ok(message) = Message::try_from(element) {
-        // eprintln!("+ whole message: {message:?}");
+        trace!("whole message: {message:?}");
         match (message.from, message.bodies.get("")) {
             (Some(from), Some(body)) => {
                 let bare_from = from.to_bare();
@@ -152,14 +169,14 @@ async fn handle_xmpp_element(element: Element, context: &Context) -> Result<()> 
                         println!("{muc_pm}<{from}> {}", line.trim());
                     }
                 } else {
-                    // eprintln!("+ ignoring: from: '{from}', body: {body:?}");
+                    info!("ignoring: from: '{from}', body: {body:?}");
                 }
             }
             (Some(from), None) => {
                 // maybe carbons
                 if context.bare_me == from {
                     // we can trust this if it's carbons
-                    // eprintln!("+ got a carbon");
+                    trace!("got a carbon");
                     if let Some(carbon) = message
                         .payloads
                         .into_iter()
@@ -176,11 +193,12 @@ async fn handle_xmpp_element(element: Element, context: &Context) -> Result<()> 
                         })
                     {
                         // recurse!
+                        trace!("found and recursing on carbon");
                         return handle_xmpp_element(carbon, context).await;
                     }
                 }
             }
-            _ => (), // eprintln!("+ ignoring message"),
+            _ => info!("ignoring message"),
         }
     }
     Ok(())
