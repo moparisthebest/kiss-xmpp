@@ -25,10 +25,7 @@ toml = "0.8"
 serde_derive = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 dirs = "5.0.1"
-minidom = "0.15"
-tokio-xmpp = { version = "3.5.0", default-features = false, features = ["tls-rust"] }
 tokio = { version = "1", features = ["net", "rt", "rt-multi-thread", "macros", "io-util", "io-std"] }
-xmpp-parsers = "0.20"
 die = "0.2.0"
 anyhow = "1.0"
 log = "0.4"
@@ -36,5 +33,19 @@ env_logger = "0.10"
 rand = "0.8.5"
 async-recursion = "1.0.5"
 
+# from xmpp-rs
+minidom = "0.15"
+tokio-xmpp = { version = "3.5.0", default-features = false, features = ["tls-rust"] }
+xmpp-parsers = "0.20"
+
 [profile.release]
 strip = true
+
+[patch.crates-io]
+# minidom = { path = "../xmpp-rs/minidom" }
+# tokio-xmpp = { path = "../xmpp-rs/tokio-xmpp" }
+# xmpp-parsers = { path = "../xmpp-rs/parsers" }
+minidom = { git = "https://gitlab.com/moparisthebest/xmpp-rs", branch = "task/async-client-any-stream" }
+tokio-xmpp = { git = "https://gitlab.com/moparisthebest/xmpp-rs", branch = "task/async-client-any-stream" }
+xmpp-parsers = { git = "https://gitlab.com/moparisthebest/xmpp-rs", branch = "task/async-client-any-stream" }
+

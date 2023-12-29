@@ -5,8 +5,11 @@ use futures::stream::StreamExt;
 use log::{info, trace};
 use serde_derive::Deserialize;
 use std::{convert::TryFrom, fs::File, io::Read, iter::Iterator, path::Path, str::FromStr};
-use tokio::io::{self, AsyncBufReadExt, BufReader};
-use tokio_xmpp::{AsyncClient as Client, Event};
+use tokio::{
+    io::{self, AsyncBufReadExt, BufReader},
+    net::TcpStream,
+};
+use tokio_xmpp::{AsyncClient as Client, AsyncServerConnector, Event};
 use xmpp_parsers::{
     message::{Body, Message, MessageType},
     muc::Muc,
@@ -45,6 +48,25 @@ impl Context {
             is_muc: matches!(contact, Jid::Full(_)),
             contact,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TcpServerConfig(String);
+
+impl tokio_xmpp::AsyncServerConnector for TcpServerConfig {
+    type Stream = TcpStream;
+    async fn connect(
+        &self,
+        jid: &Jid,
+    ) -> Result<tokio_xmpp::xmpp_stream::XMPPStream<Self::Stream>, tokio_xmpp::Error> {
+        let stream = TcpStream::connect(&self.0).await?;
+        tokio_xmpp::xmpp_stream::XMPPStream::start(
+            stream,
+            jid.clone(),
+            xmpp_parsers::ns::JABBER_CLIENT.to_owned(),
+        )
+        .await
     }
 }
 
@@ -93,7 +115,12 @@ async fn main() {
 
     let context = Context::new(bare_me, contact);
 
-    let mut client = Client::new(context.bare_me.clone(), &cfg.password);
+    let client_cfg = tokio_xmpp::AsyncConfig {
+        jid: context.bare_me.clone().into(),
+        password: cfg.password,
+        server: TcpServerConfig("127.0.0.1:15270".to_owned()),
+    };
+    let mut client = Client::new_with_config(client_cfg);
     client.set_reconnect(true);
 
     // after calling this the program can only exit with die!(), not the normal way, see comment below
@@ -133,7 +160,11 @@ async fn main() {
     die!(exit_code)
 }
 
-async fn handle_xmpp(event: Option<Event>, client: &mut Client, context: &Context) -> Result<()> {
+async fn handle_xmpp<S: AsyncServerConnector>(
+    event: Option<Event>,
+    client: &mut Client<S>,
+    context: &Context,
+) -> Result<()> {
     // println!("event: {event:?}");
     match event {
         Some(Event::Online { .. }) => {
@@ -227,7 +258,11 @@ async fn handle_xmpp_element(element: Element, context: &Context) -> Result<()> 
 }
 
 /// true to quit, false otherwise
-async fn handle_line(line: String, client: &mut Client, context: &Context) -> Result<bool> {
+async fn handle_line<S: AsyncServerConnector>(
+    line: String,
+    client: &mut Client<S>,
+    context: &Context,
+) -> Result<bool> {
     let line = line.trim();
     match line {
         "/quit" => return Ok(true),
