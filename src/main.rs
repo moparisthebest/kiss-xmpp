@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use die::{die, Die};
 use env_logger::{Builder, Env, Target};
 use futures::stream::StreamExt;
@@ -49,7 +49,7 @@ impl Context {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     let mut args = Args::default();
 
     if args.flags(&["-h", "--help"]) {
@@ -93,45 +93,67 @@ async fn main() -> Result<()> {
 
     let context = Context::new(bare_me, contact);
 
+    let mut client = Client::new(context.bare_me.clone(), &cfg.password);
+    client.set_reconnect(true);
+
+    // after calling this the program can only exit with die!(), not the normal way, see comment below
     let stdin = io::stdin();
     let reader = BufReader::new(stdin);
     let mut lines = reader.lines();
 
-    let mut client = Client::new(context.bare_me.clone(), &cfg.password);
-    client.set_reconnect(true);
-
-    loop {
-        tokio::select! {
-        Some(event) = client.next() => handle_xmpp(event, &mut client, &context).await?,
-        Ok(Some(line)) = lines.next_line() => {
-            if handle_line(line, &mut client, &context).await? {
-                break;
+    // why am I doing stupid things instead of having main return Result<> like any normal rust program?
+    // https://docs.rs/tokio/latest/tokio/io/fn.stdin.html
+    // blocks until a user hits enter, so they never see errors or that we've exited until they do...
+    let res: Result<()> = async {
+        loop {
+            tokio::select! {
+                event = client.next() => handle_xmpp(event, &mut client, &context).await?,
+                Ok(Some(line)) = lines.next_line() => {
+                    if handle_line(line, &mut client, &context).await? {
+                        client.set_reconnect(false);
+                        client.send_end().await.ok(); // ignore errors here, I guess
+                        break Ok(());
+                    }
+                }
             }
         }
-        }
     }
+    .await;
 
-    // Close client connection
-    client.send_end().await.ok(); // ignore errors here, I guess
+    let exit_code = match res {
+        Err(e) => {
+            println!("NOTICE: fatal error: {e}");
+            println!("NOTICE: potentially bad jid/password in config file?");
+            1
+        }
+        Ok(_) => 0,
+    };
+    println!("NOTICE: kiss-xmpp exiting, goodbye!");
 
-    Ok(())
+    die!(exit_code)
 }
 
-async fn handle_xmpp(event: Event, client: &mut Client, context: &Context) -> Result<()> {
-    if event.is_online() {
-        if context.is_muc {
-            let join = make_join(context.contact.clone());
-            client.send_stanza(join).await?;
-            println!("NOTICE: sent room join!");
-        } else {
-            let presence = make_presence();
-            client.send_stanza(presence).await?;
-            let carbons = make_carbons_enable();
-            client.send_stanza(carbons).await?;
-            println!("NOTICE: online!");
+async fn handle_xmpp(event: Option<Event>, client: &mut Client, context: &Context) -> Result<()> {
+    // println!("event: {event:?}");
+    match event {
+        Some(Event::Online { .. }) => {
+            if context.is_muc {
+                let join = make_join(context.contact.clone());
+                client.send_stanza(join).await?;
+                println!("NOTICE: sent room join!");
+            } else {
+                let presence = make_presence();
+                client.send_stanza(presence).await?;
+                let carbons = make_carbons_enable();
+                client.send_stanza(carbons).await?;
+                println!("NOTICE: online!");
+            }
         }
-    } else if let Some(element) = event.into_stanza() {
-        handle_xmpp_element(element, context).await?;
+        Some(Event::Stanza(element)) => {
+            handle_xmpp_element(element, context).await?;
+        }
+        Some(Event::Disconnected(e)) => Err(e)?,
+        None => bail!("XMPP stream ended, shouldn't happen"),
     }
     Ok(())
 }
