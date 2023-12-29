@@ -37,7 +37,7 @@ impl Context {
     fn new(bare_me: BareJid, contact: Jid) -> Context {
         Self {
             bare_me,
-            bare_contact: BareJid::from(contact.clone()),
+            bare_contact: contact.to_bare(),
             is_muc: matches!(contact, Jid::Full(_)),
             contact,
         }
@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
     let reader = BufReader::new(stdin);
     let mut lines = reader.lines();
 
-    let mut client = Client::new(&cfg.jid, &cfg.password)?;
+    let mut client = Client::new(context.bare_me.clone(), &cfg.password);
     client.set_reconnect(true);
 
     loop {
@@ -125,12 +125,12 @@ async fn handle_xmpp_element(element: Element, context: &Context) -> Result<()> 
         // eprintln!("+ whole message: {message:?}");
         match (message.from, message.bodies.get("")) {
             (Some(from), Some(body)) => {
-                let bare_from = BareJid::from(from.clone());
+                let bare_from = from.to_bare();
                 if bare_from == context.bare_contact || bare_from == context.bare_me {
                     let from = match from {
                         Jid::Full(jid) => {
                             if context.is_muc {
-                                jid.resource
+                                jid.resource_str().to_string()
                             } else {
                                 bare_from.to_string()
                             }
