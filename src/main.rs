@@ -98,12 +98,19 @@ async fn main() -> Result<()> {
     let mut lines = reader.lines();
 
     let mut client = Client::new(context.bare_me.clone(), &cfg.password);
-    client.set_reconnect(true);
+    // client.set_reconnect(true);
 
     loop {
         tokio::select! {
-        Some(event) = client.next() => handle_xmpp(event, &mut client, &context).await?,
+        event = client.next() => {
+                println!("got event: {event:?}");
+            match event {
+                Some(event) => handle_xmpp(event, &mut client, &context).await?,
+                None => break,
+            }
+        }
         Ok(Some(line)) = lines.next_line() => {
+                println!("got line");
             if handle_line(line, &mut client, &context).await? {
                 break;
             }
@@ -111,9 +118,13 @@ async fn main() -> Result<()> {
         }
     }
 
+    println!("NOTICE: kiss-xmpp exiting, goodbye!");
     // Close client connection
-    client.send_end().await.ok(); // ignore errors here, I guess
+    // client.send_end().await.ok(); // ignore errors here, I guess
+    drop(client);
+    drop(lines);
 
+    println!("ok really quitting");
     Ok(())
 }
 
