@@ -2,16 +2,17 @@ use anyhow::{bail, Result};
 use die::{die, Die};
 use env_logger::{Builder, Env, Target};
 use futures::stream::StreamExt;
+use jid::{BareJid, Jid};
 use log::{info, trace};
+use minidom::Element;
 use serde_derive::Deserialize;
 use std::{convert::TryFrom, fs::File, io::Read, iter::Iterator, path::Path, str::FromStr};
 use tokio::io::{self, AsyncBufReadExt, BufReader};
-use tokio_xmpp::{AsyncClient as Client, Event};
+use tokio_xmpp::{starttls::StartTlsAsyncClient as Client, Event};
 use xmpp_parsers::{
     message::{Body, Message, MessageType},
     muc::Muc,
     presence::{Presence, Show, Type as PresenceType},
-    BareJid, Element, Jid,
 };
 
 #[derive(Deserialize)]
@@ -42,7 +43,7 @@ impl Context {
         Self {
             bare_me,
             bare_contact: contact.to_bare(),
-            is_muc: matches!(contact, Jid::Full(_)),
+            is_muc: contact.is_full(),
             contact,
         }
     }
@@ -166,15 +167,15 @@ async fn handle_xmpp_element(element: Element, context: &Context) -> Result<()> 
             (Some(from), Some(body)) => {
                 let bare_from = from.to_bare();
                 if bare_from == context.bare_contact || bare_from == context.bare_me {
-                    let from = match from {
-                        Jid::Full(jid) => {
+                    let from = match from.try_into_full() {
+                        Ok(jid) => {
                             if context.is_muc {
-                                jid.resource_str().to_string()
+                                jid.resource().to_string()
                             } else {
                                 bare_from.to_string()
                             }
                         }
-                        from => from.to_string(),
+                        Err(from) => from.to_string(),
                     };
                     let body = &body.0;
                     let muc_pm = if message
